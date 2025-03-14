@@ -1,8 +1,28 @@
-/*
+/* Styles for the Secure JS plugin */
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
-
-If your plugin does not need CSS, delete this file.
-
-*/
+.secure-js-error {
+    background-color: rgba(255, 0, 0, 0.1);
+    border-left: 3px solid red;
+    padding: 1em;
+    margin: 1em 0;
+    border-radius: 4px;
+  }
+  
+  .secure-js-error h3 {
+    color: red;
+    margin-top: 0;
+  }
+  
+  .secure-js-error button {
+    background-color: #5a67d8;
+    color: white;
+    padding: 5px 10px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-top: 10px;
+  }
+  
+  .secure-js-error button:hover {
+    background-color: #434190;
+}

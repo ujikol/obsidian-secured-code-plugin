@@ -1,85 +1,28 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import { App, Plugin, PluginSettingTab, Setting, MarkdownPostProcessorContext, MarkdownRenderer, Notice } from 'obsidian';
+import * as crypto from 'crypto';
 
-// Remember to rename these classes and interfaces!
-
-interface MyPluginSettings {
-	mySetting: string;
+interface SecureJsSettings {
+	trustedHashesNotes: string[];
+	trustedExternalFiles: string[];
+	trustedHashes: string[];
 }
 
-const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
+const DEFAULT_SETTINGS: SecureJsSettings = {
+	trustedHashesNotes: [],
+	trustedExternalFiles: [],
+	trustedHashes: []
 }
 
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
+export default class SecureJsPlugin extends Plugin {
+	settings: SecureJsSettings;
+    allTrustedHashes: string[] = [];
 
 	async onload() {
 		await this.loadSettings();
-
-		// This creates an icon in the left ribbon.
-		const ribbonIconEl = this.addRibbonIcon('dice', 'Sample Plugin', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
-		// Perform additional things with the ribbon
-		ribbonIconEl.addClass('my-plugin-ribbon-class');
-
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status Bar Text');
-
-		// This adds a simple command that can be triggered anywhere
-		this.addCommand({
-			id: 'open-sample-modal-simple',
-			name: 'Open sample modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
-			}
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'sample-editor-command',
-			name: 'Sample editor command',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				console.log(editor.getSelection());
-				editor.replaceSelection('Sample Editor Command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-sample-modal-complex',
-			name: 'Open sample modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
-
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-			}
-		});
-
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			console.log('click', evt);
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
-	}
-
-	onunload() {
-
+		this.registerMarkdownCodeBlockProcessor('secure-dataviewjs', this.processSecureDataviewJsBlock.bind(this));
+		this.registerMarkdownCodeBlockProcessor('secure-meta-bind-button', this.processSecureMetaBindButtonBlock.bind(this));
+		this.addSettingTab(new SecureJsSettingTab(this.app, this));
+		this.app.workspace.onLayoutReady(() => this.loadTrustedHashes());
 	}
 
 	async loadSettings() {
@@ -89,46 +32,250 @@ export default class MyPlugin extends Plugin {
 	async saveSettings() {
 		await this.saveData(this.settings);
 	}
+
+	async loadTrustedHashes() {
+		const trustedHashes = [...this.settings.trustedHashes];
+
+		// Load hashes from trusted notes
+		for (const notePath of this.settings.trustedHashesNotes) {
+			try {
+				const file = this.app.vault.getFileByPath(notePath + ".md");
+                console.log('File:', notePath, file);
+				if (file && file.path) {
+					const content = await this.app.vault.read(file);
+					const lines = content.split('\n');
+					for (const line of lines) {
+						const hash = line.trim();
+						if (hash && !trustedHashes.includes(hash)) {
+							trustedHashes.push(hash);
+						}
+					}
+				}
+			} catch (error) {
+				console.error(`Failed to load trusted hashes from note ${notePath}:`, error);
+			}
+		}
+
+		// Load hashes from external files
+		for (const filePath of this.settings.trustedExternalFiles) {
+			try {
+				const response = await fetch(`file://${filePath}`);
+				if (response.ok) {
+					const text = await response.text();
+					const lines = text.split('\n');
+					for (const line of lines) {
+						const hash = line.trim();
+						if (hash && !trustedHashes.includes(hash)) {
+							trustedHashes.push(hash);
+						}
+					}
+				}
+			} catch (error) {
+				console.error(`Failed to load trusted hashes from external file ${filePath}:`, error);
+			}
+		}
+
+		// Update the trusted hashes in memory (not persisted to settings)
+		this.allTrustedHashes = trustedHashes;
+	}
+
+	calculateHash(content: string): string {
+		return crypto.createHash('sha256').update(content).digest('hex');
+	}
+
+	async processSecureDataviewJsBlock(source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) {
+        this.processSecureJsBlock('dataviewjs', source, el, ctx)
+    }
+
+	async processSecureMetaBindButtonBlock(source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) {
+        this.processSecureJsBlock('meta-bind-button', source, el, ctx)
+    }
+
+    async processSecureJsBlock(type: string, source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) {
+		const hash = this.calculateHash(source);
+		
+		if (this.allTrustedHashes.includes(hash)) {
+			// if (this.app.plugins.getPlugin('dataview')) {
+                const block = `\`\`\`${type}\n${source}\n\`\`\``
+				await MarkdownRenderer.render(this.app, block, el, ctx.sourcePath, this);
+			// } else {
+			// 	el.createEl('div', {
+			// 		cls: 'secure-js-error',
+			// 		text: 'Error: Dataview plugin is required but not enabled.'
+			// 	});
+			// }
+		} else {
+			// Hash is not trusted, show error message
+			const errorEl = el.createEl('div', { cls: 'secure-js-error' });
+			errorEl.createEl('h3', { text: 'Untrusted DataviewJS Code' });
+			errorEl.createEl('p', { text: 'This code block hash does not match any trusted hash.' });
+			errorEl.createEl('p', { text: `Hash: ${hash}` });
+			
+			// Add a button to copy the hash for easy addition to trusted list
+			const copyButton = errorEl.createEl('button', { text: 'Copy Hash' });
+			copyButton.addEventListener('click', () => {
+				navigator.clipboard.writeText(hash);
+				copyButton.setText('Copied!');
+				setTimeout(() => {
+					copyButton.setText('Copy Hash');
+				}, 2000);
+			});
+		}
+	}
 }
 
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
+class SecureJsSettingTab extends PluginSettingTab {
+	plugin: SecureJsPlugin;
 
-	onOpen() {
-		const {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
-	}
-}
-
-class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
-
-	constructor(app: App, plugin: MyPlugin) {
+	constructor(app: App, plugin: SecureJsPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
 
 	display(): void {
-		const {containerEl} = this;
-
+		const { containerEl } = this;
 		containerEl.empty();
 
+		containerEl.createEl('h2', { text: 'Secure JS Settings' });
+		
+		containerEl.createEl('h3', { text: 'Trusted Notes' });
+		containerEl.createEl('p', { 
+			text: 'List of notes in your vault that contain trusted hashes (one hash per line).'
+		});
+
 		new Setting(containerEl)
-			.setName('Setting #1')
-			.setDesc('It\'s a secret')
+			.setName('Add Trusted Note')
+			.setDesc('Enter the path to a note containing trusted hashes')
 			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
+				.setPlaceholder('path/to/trusted-hashes.md')
 				.onChange(async (value) => {
-					this.plugin.settings.mySetting = value;
-					await this.plugin.saveSettings();
+					// Don't save until the Add button is clicked
+				}))
+			.addButton(button => button
+				.setButtonText('Add')
+				.onClick(async () => {
+					const inputEl = button.buttonEl.parentElement?.querySelector('input');
+					if (inputEl && inputEl.value) {
+						const notePath = inputEl.value;
+						if (!this.plugin.settings.trustedHashesNotes.includes(notePath)) {
+							this.plugin.settings.trustedHashesNotes.push(notePath);
+							await this.plugin.saveSettings();
+							await this.plugin.loadTrustedHashes();
+							this.display(); // Refresh the settings panel
+						}
+						inputEl.value = '';
+					}
+				}));
+
+		// Display current trusted notes with delete buttons
+		this.plugin.settings.trustedHashesNotes.forEach((notePath, index) => {
+			new Setting(containerEl)
+				.setName(notePath)
+				.addButton(button => button
+					.setButtonText('Remove')
+					.onClick(async () => {
+						this.plugin.settings.trustedHashesNotes.splice(index, 1);
+						await this.plugin.saveSettings();
+						await this.plugin.loadTrustedHashes();
+						this.display(); // Refresh the settings panel
+					}));
+		});
+
+		containerEl.createEl('h3', { text: 'Trusted External Files' });
+		containerEl.createEl('p', { 
+			text: 'List of external files that contain trusted hashes (one hash per line).'
+		});
+
+		new Setting(containerEl)
+			.setName('Add External File')
+			.setDesc('Enter the path to an external file containing trusted hashes')
+			.addText(text => text
+				.setPlaceholder('/path/to/trusted-hashes.txt')
+				.onChange(async (value) => {
+					// Don't save until the Add button is clicked
+				}))
+			.addButton(button => button
+				.setButtonText('Add')
+				.onClick(async () => {
+					const inputEl = button.buttonEl.parentElement?.querySelector('input');
+					if (inputEl && inputEl.value) {
+						const filePath = inputEl.value;
+						if (!this.plugin.settings.trustedExternalFiles.includes(filePath)) {
+							this.plugin.settings.trustedExternalFiles.push(filePath);
+							await this.plugin.saveSettings();
+							await this.plugin.loadTrustedHashes();
+							this.display(); // Refresh the settings panel
+						}
+						inputEl.value = '';
+					}
+				}));
+
+		// Display current trusted external files with delete buttons
+		this.plugin.settings.trustedExternalFiles.forEach((filePath, index) => {
+			new Setting(containerEl)
+				.setName(filePath)
+				.addButton(button => button
+					.setButtonText('Remove')
+					.onClick(async () => {
+						this.plugin.settings.trustedExternalFiles.splice(index, 1);
+						await this.plugin.saveSettings();
+						await this.plugin.loadTrustedHashes();
+						this.display(); // Refresh the settings panel
+					}));
+		});
+
+		containerEl.createEl('h3', { text: 'Manual Trusted Hashes' });
+		containerEl.createEl('p', { 
+			text: 'You can also directly add trusted hashes here.'
+		});
+
+		new Setting(containerEl)
+			.setName('Add Trusted Hash')
+			.setDesc('Enter a hash to trust')
+			.addText(text => text
+				.setPlaceholder('e.g., 7d1a54127b222502f5b79b5fb0803061152a44f92b37e23c6527baf665d4da9a')
+				.onChange(async (value) => {
+					// Don't save until the Add button is clicked
+				}))
+			.addButton(button => button
+				.setButtonText('Add')
+				.onClick(async () => {
+					const inputEl = button.buttonEl.parentElement?.querySelector('input');
+					if (inputEl && inputEl.value) {
+						const hash = inputEl.value.trim();
+						if (!this.plugin.settings.trustedHashes.includes(hash)) {
+							this.plugin.settings.trustedHashes.push(hash);
+							await this.plugin.saveSettings();
+							this.display(); // Refresh the settings panel
+						}
+						inputEl.value = '';
+					}
+				}));
+
+		// Display current manual trusted hashes with delete buttons
+		this.plugin.settings.trustedHashes.forEach((hash, index) => {
+			new Setting(containerEl)
+				.setName(hash)
+				.addButton(button => button
+					.setButtonText('Remove')
+					.onClick(async () => {
+						this.plugin.settings.trustedHashes.splice(index, 1);
+						await this.plugin.saveSettings();
+						this.display(); // Refresh the settings panel
+					}));
+		});
+
+		// Add a button to reload trusted hashes
+		containerEl.createEl('h3', { text: 'Actions' });
+		
+		new Setting(containerEl)
+			.setName('Reload Trusted Hashes')
+			.setDesc('Reload all trusted hashes from notes and external files')
+			.addButton(button => button
+				.setButtonText('Reload')
+				.onClick(async () => {
+					await this.plugin.loadTrustedHashes();
+					new Notice('Trusted hashes reloaded successfully!');
 				}));
 	}
 }
