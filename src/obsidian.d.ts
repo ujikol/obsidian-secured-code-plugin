@@ -1,7 +1,5 @@
 import { DataviewApi } from 'obsidian-dataview'
 import {EditorView} from '@codemirror/view'
-// import { DataArray } from 'obsidian-dataview/lib/api/data-array'
-// import * as internal from 'stream'
 
 export interface ObsidianCommandInterface {
     executeCommandById(id: string): void
