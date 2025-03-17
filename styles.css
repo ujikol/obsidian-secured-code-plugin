@@ -1,6 +1,6 @@
 /* Styles for the Secure JS plugin */
 
-.secure-js-error {
+.secured-code-error {
     background-color: rgba(255, 0, 0, 0.1);
     border-left: 3px solid red;
     padding: 1em;
@@ -8,12 +8,12 @@
     border-radius: 4px;
   }
   
-  .secure-js-error h3 {
+  .secured-code-error h3 {
     color: red;
     margin-top: 0;
   }
   
-  .secure-js-error button {
+  .secured-code-error button {
     background-color: #5a67d8;
     color: white;
     padding: 5px 10px;
@@ -23,6 +23,6 @@
     margin-top: 10px;
   }
   
-  .secure-js-error button:hover {
+  .secured-code-error button:hover {
     background-color: #434190;
 }
